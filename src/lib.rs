@@ -108,23 +108,23 @@ impl Emulator {
             //RET
             (0, 0, 0xE, 0xE) => self.return_from_subroutine(),
             //JMP NNN
-            (1, _, _, _) => self.jump_to_instruction(),
+            (1, _, _, _) => self.jump_to_location(op_code & 0x0FFF),
             //CALL NNN
-            (2, _, _, _) => return,
+            (2, _, _, _) => self.call_subroutine_at_location(op_code & 0x0FFF),
             //SKIP VX == NN
-            (3, _, _, _) => return,
+            (3, _, _, _) => self.skip_instruction_if_vx_equals_nn(digit2 as usize, (op_code & 0x00FF) as u8),
             //SKIP VX != NN
-            (4, _, _, _) => return,
+            (4, _, _, _) => self.skip_instruction_if_vx_not_equals_nn(digit2 as usize, (op_code & 0x00FF) as u8),
             //SKIP VX == VY
-            (5, _, _, 0) => return,
+            (5, _, _, 0) => self.skip_instruction_if_vx_equals_vy(digit2 as usize, digit3 as usize),
             //VX = NN
-            (6, _, _, _) => return,
+            (6, _, _, _) => self.set_vx(digit2 as usize, (op_code & 0x00FF) as u8),
             //VX += NN
-            (7, _, _, _) => return,
+            (7, _, _, _) => self.add_vx(digit2 as usize, (op_code & 0x00FF) as u8),
             //VX = VY
-            (8, _, _, 0) => return,
+            (8, _, _, 0) => self.copy_vy_into_vx(digit2 as usize, digit3 as usize),
             //VX |= VY
-            (8, _, _, 1) => return,
+            (8, _, _, 1) => self.bitwise_or_on_vx_vy(digit2 as usize, digit3 as usize),
             //VX &= VY
             (8, _, _, 2) => return,
             //VX ^= VY
@@ -188,16 +188,48 @@ impl Emulator {
         self.program_counter = return_address;
     }
 
-    fn jump_to_instruction(&mut self) {
-        
+    fn jump_to_location(&mut self, location: u16) {
+        self.program_counter = location;
     }
 
-    fn call_subroutine(&mut self) {
-
+    fn call_subroutine_at_location(&mut self, location: u16) {
+        self.push(self.program_counter);
+        self.program_counter = location;
     }
 
-    fn skip_if_vx_equals_nn(&mut self) {
+    fn skip_instruction_if_vx_equals_nn(&mut self, vx: usize, nn: u8) {
+        if self.v_registers[vx] == nn {
+            self.program_counter += 2;
+        }
+    }
 
+    fn skip_instruction_if_vx_not_equals_nn(&mut self, vx: usize, nn: u8) {
+        if self.v_registers[vx] != nn {
+            self.program_counter += 2;
+        }
+    }
+
+    fn skip_instruction_if_vx_equals_vy(&mut self, vx: usize, vy: usize) {
+        if self.v_registers[vx] == self.v_registers[vy] {
+            self.program_counter += 2;
+        }
+    }
+
+    fn set_vx(&mut self, vx: usize, nn: u8) {
+        self.v_registers[vx] = nn;
+    }
+
+    fn add_vx(&mut self, vx: usize, nn: u8) {
+        //In case of an overflow rust would panic, while CHIP-8 would not
+        self.v_registers[vx] = self.v_registers[vx].wrapping_add(nn);
+    }
+
+    fn copy_vy_into_vx(&mut self, vx: usize, vy: usize) {
+        self.v_registers[vx] = self.v_registers[vy];
+    }
+
+    fn bitwise_or_on_vx_vy(&mut self, vx: usize, vy: usize) {
+        self.v_registers[vx] |= self.v_registers[vy];
     }
 
     fn push(&mut self, value: u16) {
