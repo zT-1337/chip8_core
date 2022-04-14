@@ -124,19 +124,19 @@ impl Emulator {
             //VX = VY
             (8, _, _, 0) => self.copy_vy_into_vx(digit2 as usize, digit3 as usize),
             //VX |= VY
-            (8, _, _, 1) => self.bitwise_or_on_vx_vy(digit2 as usize, digit3 as usize),
+            (8, _, _, 1) => self.bitwise_or_vx_with_vy(digit2 as usize, digit3 as usize),
             //VX &= VY
-            (8, _, _, 2) => return,
+            (8, _, _, 2) => self.bitwise_and_vx_with_vy(digit2 as usize, digit3 as usize),
             //VX ^= VY
-            (8, _, _, 3) => return,
+            (8, _, _, 3) => self.bitwise_xor_vx_with_vy(digit2 as usize, digit3 as usize),
             //VX += VY
-            (8, _, _, 4) => return,
+            (8, _, _, 4) => self.add_vx_with_vy_with_carry(digit2 as usize, digit3 as usize),
             //VX -= VY
-            (8, _, _, 5) => return,
+            (8, _, _, 5) => self.subtract_vx_with_vy_with_borrow(digit2 as usize, digit3 as usize),
             //Vx >>= 1
-            (8, _, _, 6) => return,
+            (8, _, _, 6) => self.bit_shift_right_vx(digit2 as usize),
             //VX = VY - VX
-            (8, _, _, 7) => return,
+            (8, _, _, 7) => self.subtract_vy_with_vx_store_in_vx_with_borrow(digit2 as usize, digit3 as usize),
             //VX <<= 1
             (8, _, _, 0xE) => return,
             //SKIP VX != VY
@@ -228,8 +228,44 @@ impl Emulator {
         self.v_registers[vx] = self.v_registers[vy];
     }
 
-    fn bitwise_or_on_vx_vy(&mut self, vx: usize, vy: usize) {
+    fn bitwise_or_vx_with_vy(&mut self, vx: usize, vy: usize) {
         self.v_registers[vx] |= self.v_registers[vy];
+    }
+
+    fn bitwise_and_vx_with_vy(&mut self, vx: usize, vy: usize) {
+        self.v_registers[vx] &= self.v_registers[vy];
+    }
+
+    fn bitwise_xor_vx_with_vy(&mut self, vx: usize, vy: usize) {
+        self.v_registers[vx] ^= self.v_registers[vy];
+    }
+
+    fn add_vx_with_vy_with_carry(&mut self, vx: usize, vy: usize) {
+        let (result, is_overflown) = self.v_registers[vx].overflowing_add(self.v_registers[vy]);
+
+        self.v_registers[vx] = result;
+        self.v_registers[0xF] = if is_overflown { 1 } else { 0 };
+    }
+
+    fn subtract_vx_with_vy_with_borrow(&mut self, vx: usize, vy: usize) {
+        let (result, is_underflown) = self.v_registers[vx].overflowing_sub(self.v_registers[vy]);
+
+        self.v_registers[vx] = result;
+        self.v_registers[0xF] = if is_underflown { 0 } else { 1 };
+    }
+
+    fn bit_shift_right_vx(&mut self, vx: usize) {
+        let least_significant_bit = self.v_registers[vx] & 1;
+
+        self.v_registers[vx] >>= 1;
+        self.v_registers[0xF] = least_significant_bit;
+    }
+
+    fn subtract_vy_with_vx_store_in_vx_with_borrow(&mut self, vx: usize, vy: usize) {
+        let (result, is_underflown) = self.v_registers[vy].overflowing_sub(self.v_registers[vx]);
+
+        self.v_registers[vx] = result;
+        self.v_registers[0xF] = if is_underflown { 0 } else { 1 };
     }
 
     fn push(&mut self, value: u16) {
