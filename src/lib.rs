@@ -432,4 +432,18 @@ impl Emulator {
             self.sound_timer -= 1;
         }
     }
+
+    pub fn get_display(&self) -> &[bool] {
+        &self.screen
+    }
+
+    pub fn set_key_press(&mut self, index: usize, pressed: bool) {
+        self.keys_pressed[index] = pressed;
+    }
+
+    pub fn load_rom(&mut self, rom: &[u8]) {
+        let start = START_ADDRESS as usize;
+        let end = start + rom.len();
+        self.ram[start..end].copy_from_slice(rom);
+    }
 }
