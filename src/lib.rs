@@ -1,3 +1,5 @@
+use rand::Rng;
+
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
 
@@ -138,39 +140,39 @@ impl Emulator {
             //VX = VY - VX
             (8, _, _, 7) => self.subtract_vy_with_vx_store_in_vx_with_borrow(digit2 as usize, digit3 as usize),
             //VX <<= 1
-            (8, _, _, 0xE) => return,
+            (8, _, _, 0xE) => self.bit_shift_left_vx(digit2 as usize),
             //SKIP VX != VY
-            (9, _, _, 0) => return,
+            (9, _, _, 0) => self.skip_instruction_if_vx_not_equals_vy(digit2 as usize, digit3 as usize),
             // I = NNN
-            (0xA, _, _, _) => return,
+            (0xA, _, _, _) => self.set_i(op_code & 0x0FFF),
             //JMP V0 + NNN
-            (0xB, _, _, _) => return,
+            (0xB, _, _, _) => self.jump_to_location_plus_v0(op_code & 0x0FFf),
             //VX = rand() & NN
-            (0xC, _, _, _) => return,
+            (0xC, _, _, _) => self.set_vx_with_random_value_and_nn(digit2 as usize, (op_code & 0x00FF) as u8),
             //DRAW
-            (0xD, _, _, _) => return,
+            (0xD, _, _, _) => self.draw_sprite(digit2 as usize, digit3 as usize, digit4 as usize),
             //SKIP KEY PRESS
-            (0xE, _, 9, 0xE) => return,
+            (0xE, _, 9, 0xE) => self.skip_instruction_if_key_vx_is_pressed(digit2 as usize),
             //SKIP KEY RELEASE
-            (0xE, _, 0xA, 1) => return,
+            (0xE, _, 0xA, 1) => self.skip_instruction_if_key_vx_is_not_pressed(digit2 as usize),
             //VX = DT
-            (0xF, _, 0, 7) => return,
+            (0xF, _, 0, 7) => self.copy_delay_timer_into_vx(digit2 as usize),
             //WAIT KEY
-            (0xF, _, 0, 0xA) => return,
+            (0xF, _, 0, 0xA) => self.wait_for_key_press_and_store_key_value_in_vx(digit2 as usize),
             //DT = VX
-            (0xF, _, 1, 5) => return,
+            (0xF, _, 1, 5) => self.copy_vx_into_delay_timer(digit2 as usize),
             //ST = VX
-            (0xF, _, 1, 8) => return,
+            (0xF, _, 1, 8) => self.copy_vx_into_sound_timer(digit2 as usize),
             //I += VX
-            (0xF, _, 1, 0xE) => return,
+            (0xF, _, 1, 0xE) => self.add_i_with_vx(digit2 as usize),
             // I = FONT
-            (0xF, _, 2, 9) => return,
+            (0xF, _, 2, 9) => self.set_location_of_sprite_for_vx(digit2 as usize),
             // BCD
-            (0xF, _, 3, 3) => return,
+            (0xF, _, 3, 3) => self.store_bcd_of_vx_in_ram(digit2 as usize),
             //STORE V0 - VX
-            (0xF, _, 5, 5) => return,
+            (0xF, _, 5, 5) => self.write_registers_v0_to_vx_in_ram_starting_at_i(digit2 as usize),
             //LOAD V0 - VX
-            (0xF, _, 6, 5) => return,
+            (0xF, _, 6, 5) => self.read_registers_v0_to_vx_from_ram_starting_at_i(digit2 as usize),
             //should not happen
             (_, _, _, _) => unimplemented!(
                 "Unimplemented opcode: {:#04x}",
@@ -266,6 +268,85 @@ impl Emulator {
 
         self.v_registers[vx] = result;
         self.v_registers[0xF] = if is_underflown { 0 } else { 1 };
+    }
+
+    fn bit_shift_left_vx(&mut self, vx: usize) {
+        let most_significant_bit = self.v_registers[vx] & 128;
+
+        self.v_registers[vx] <<= 1;
+        self.v_registers[0xF] = most_significant_bit;
+    }
+
+    fn skip_instruction_if_vx_not_equals_vy(&mut self, vx: usize, vy: usize) {
+        if self.v_registers[vx] != self.v_registers[vy] {
+            self.program_counter += 2;
+        }
+    }
+
+    fn set_i(&mut self, value: u16) {
+        self.i_register = value;
+    }
+
+    fn jump_to_location_plus_v0(&mut self, location: u16) {
+        self.program_counter = location.wrapping_add(self.v_registers[0] as u16);
+    }
+
+    fn set_vx_with_random_value_and_nn(&mut self, vx: usize, nn: u8) {
+        self.v_registers[vx] = rand::thread_rng().gen::<u8>() & nn;
+    }
+
+    fn draw_sprite(&mut self, vx: usize, vy: usize, byte_count: usize) {
+
+    }
+
+    fn skip_instruction_if_key_vx_is_pressed(&mut self, vx: usize) {
+
+    }
+
+    fn skip_instruction_if_key_vx_is_not_pressed(&mut self, vx: usize) {
+        
+    }
+
+    fn copy_delay_timer_into_vx(&mut self, vx: usize) {
+        self.v_registers[vx] = self.delay_timer;
+    }
+
+    fn wait_for_key_press_and_store_key_value_in_vx(&mut self, vx: usize) {
+
+    }
+
+
+
+    fn copy_vx_into_delay_timer(&mut self, vx: usize) {
+        self.delay_timer = self.v_registers[vx];
+    }
+
+    fn copy_vx_into_sound_timer(&mut self, vx: usize) {
+        self.sound_timer = self.v_registers[vx];
+    }
+
+    fn add_i_with_vx(&mut self, vx: usize) {
+        self.i_register = self.i_register.wrapping_add(self.v_registers[vx] as u16);
+    }
+
+    fn set_location_of_sprite_for_vx(&mut self, vx: usize) {
+
+    }
+
+    fn store_bcd_of_vx_in_ram(&mut self, vx: usize) {
+
+    }
+
+    fn write_registers_v0_to_vx_in_ram_starting_at_i(&mut self, vx: usize) {
+        for i in 0..=vx {
+            self.ram[self.i_register as usize + i] = self.v_registers[i];
+        }
+    }
+
+    fn read_registers_v0_to_vx_from_ram_starting_at_i(&mut self, vx: usize) {
+        for i in 0..=vx {
+            self.v_registers[i] = self.ram[self.i_register as usize + i];
+        }
     }
 
     fn push(&mut self, value: u16) {
