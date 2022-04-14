@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::random;
 
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
@@ -27,6 +27,7 @@ const START_ADDRESS: u16 = 0x200;
 const RAM_SIZE: usize = 4096;
 const NUMBER_OF_V_REGISTERS: usize = 16;
 const STACK_SIZE: usize = 16;
+const NUMBER_OF_KEYS: usize = 16;
 
 pub struct Emulator {
     program_counter: u16,
@@ -36,6 +37,7 @@ pub struct Emulator {
     i_register: u16,
     stack_pointer: u16,
     stack: [u16; STACK_SIZE],
+    keys_pressed: [bool; NUMBER_OF_KEYS],
     delay_timer: u8,
     sound_timer: u8,
 }
@@ -50,6 +52,7 @@ impl Emulator {
             i_register: 0,
             stack_pointer: 0,
             stack: [0; STACK_SIZE],
+            keys_pressed: [false; NUMBER_OF_KEYS],
             delay_timer: 0,
             sound_timer: 0,
         };
@@ -67,6 +70,7 @@ impl Emulator {
         self.i_register = 0;
         self.stack_pointer = 0;
         self.stack = [0; STACK_SIZE];
+        self.keys_pressed = [false; NUMBER_OF_KEYS];
         self.delay_timer = 0;
         self.sound_timer = 0;
 
@@ -150,7 +154,7 @@ impl Emulator {
             //VX = rand() & NN
             (0xC, _, _, _) => self.set_vx_with_random_value_and_nn(digit2 as usize, (op_code & 0x00FF) as u8),
             //DRAW
-            (0xD, _, _, _) => self.draw_sprite(digit2 as usize, digit3 as usize, digit4 as usize),
+            (0xD, _, _, _) => self.draw_sprite(digit2 as usize, digit3 as usize, digit4 as u8),
             //SKIP KEY PRESS
             (0xE, _, 9, 0xE) => self.skip_instruction_if_key_vx_is_pressed(digit2 as usize),
             //SKIP KEY RELEASE
@@ -271,7 +275,7 @@ impl Emulator {
     }
 
     fn bit_shift_left_vx(&mut self, vx: usize) {
-        let most_significant_bit = self.v_registers[vx] & 128;
+        let most_significant_bit = (self.v_registers[vx] >> 7) & 1;
 
         self.v_registers[vx] <<= 1;
         self.v_registers[0xF] = most_significant_bit;
@@ -292,19 +296,47 @@ impl Emulator {
     }
 
     fn set_vx_with_random_value_and_nn(&mut self, vx: usize, nn: u8) {
-        self.v_registers[vx] = rand::thread_rng().gen::<u8>() & nn;
+        self.v_registers[vx] = random::<u8>() & nn;
     }
 
-    fn draw_sprite(&mut self, vx: usize, vy: usize, byte_count: usize) {
+    fn draw_sprite(&mut self, vx: usize, vy: usize, sprite_height: u8) {
+        //start coordinates of the sprite
+        let sprite_origin_x_cord = self.v_registers[vx];
+        let sprite_origin_y_cord = self.v_registers[vy];
 
+        let mut any_pixels_flipped = false;
+
+        for sprite_row_index in 0..sprite_height {
+            let sprite_row_address = self.i_register + sprite_row_index as u16;
+            let sprite_pixels_in_row = self.ram[sprite_row_address as usize];
+
+            //Each Sprite row is 8 pixels wide
+            for pixel_index in 0..8 {
+                if sprite_pixels_in_row & (0b1000_0000 >> pixel_index) != 0 {
+                    let x_pixel_cord = (sprite_origin_x_cord + pixel_index) as usize % SCREEN_WIDTH;
+                    let y_pixel_cord = (sprite_origin_y_cord + sprite_row_index) as usize % SCREEN_HEIGHT;
+
+                    let screen_index = x_pixel_cord + y_pixel_cord * SCREEN_WIDTH;
+
+                    any_pixels_flipped |= self.screen[screen_index];
+                    self.screen[screen_index] ^= true;
+                }
+            }
+        }
+
+        self.v_registers[0xF] = if any_pixels_flipped { 1 } else { 0 };
     }
 
     fn skip_instruction_if_key_vx_is_pressed(&mut self, vx: usize) {
-
+        if self.keys_pressed[self.v_registers[vx] as usize] {
+            self.program_counter += 2;
+        }
     }
 
     fn skip_instruction_if_key_vx_is_not_pressed(&mut self, vx: usize) {
-        
+        if !self.keys_pressed[self.v_registers[vx] as usize] {
+            self.program_counter += 2;
+        }
     }
 
     fn copy_delay_timer_into_vx(&mut self, vx: usize) {
@@ -312,10 +344,22 @@ impl Emulator {
     }
 
     fn wait_for_key_press_and_store_key_value_in_vx(&mut self, vx: usize) {
+        //cannot be implemented by loop, because the code for detecting a key press would never be executed
+        //Would need async execution of op codes and detecting key presses to do it with loop
+        //This solution is a bit inefficient, but simple
+        let mut pressed = false;
+        for i in 0..self.keys_pressed.len() {
+            if self.keys_pressed[i] {
+                self.v_registers[vx] = i as u8;
+                pressed = true;
+                break;
+            }
+        }
 
+        if !pressed {
+            self.program_counter -= 2;
+        }
     }
-
-
 
     fn copy_vx_into_delay_timer(&mut self, vx: usize) {
         self.delay_timer = self.v_registers[vx];
@@ -330,11 +374,27 @@ impl Emulator {
     }
 
     fn set_location_of_sprite_for_vx(&mut self, vx: usize) {
-
+        //The font sprite for the number 0 is stored at ram address 0
+        //The font sprite for the number 1 is stored at ram address 5
+        //...
+        //The font sprite for the number F(15) is stored at ram address 75
+        //Address for the font sprites can be understood from init_fontset function
+        self.i_register = (self.v_registers[vx] * 5) as u16;
     }
 
     fn store_bcd_of_vx_in_ram(&mut self, vx: usize) {
+        //BCD = Binary Coded Decimal
+        //Basically Stores the digits of a u8 number as three bytes in ram, starting a i register value
+        let vx_val = self.v_registers[vx];
 
+        //Not the most efficient way of BCD
+        let hundreds = vx_val / 100;
+        let tenths = (vx_val / 10) % 10;
+        let ones = vx_val as u8 % 10;
+
+        self.ram[self.i_register as usize] = hundreds;
+        self.ram[(self.i_register + 1) as usize] = tenths;
+        self.ram[(self.i_register + 2) as usize] = ones;
     }
 
     fn write_registers_v0_to_vx_in_ram_starting_at_i(&mut self, vx: usize) {
