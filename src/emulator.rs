@@ -1,8 +1,6 @@
 use crate::ram::{Ram, START_ADDRESS};
+use crate::screen::{Screen, SCREEN_HEIGHT, SCREEN_WIDTH};
 use rand::random;
-
-pub const SCREEN_WIDTH: usize = 64;
-pub const SCREEN_HEIGHT: usize = 32;
 
 const NUMBER_OF_V_REGISTERS: usize = 16;
 const STACK_SIZE: usize = 16;
@@ -11,7 +9,7 @@ const NUMBER_OF_KEYS: usize = 16;
 pub struct Emulator {
     program_counter: u16,
     ram: Ram,
-    screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
+    screen: Screen,
     v_registers: [u8; NUMBER_OF_V_REGISTERS],
     i_register: u16,
     stack_pointer: u16,
@@ -26,7 +24,7 @@ impl Emulator {
         Self {
             program_counter: START_ADDRESS,
             ram: Ram::new(),
-            screen: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
+            screen: Screen::new(),
             v_registers: [0; NUMBER_OF_V_REGISTERS],
             i_register: 0,
             stack_pointer: 0,
@@ -61,7 +59,7 @@ impl Emulator {
             //NOP
             (0, 0, 0, 0) => return,
             //CLS
-            (0, 0, 0xE, 0) => self.clear_screen(),
+            (0, 0, 0xE, 0) => self.screen.clear_screen(),
             //RET
             (0, 0, 0xE, 0xE) => self.return_from_subroutine(),
             //JMP NNN
@@ -141,10 +139,6 @@ impl Emulator {
             //should not happen
             (_, _, _, _) => unimplemented!("Unimplemented opcode: {:#04x}", op_code),
         }
-    }
-
-    fn clear_screen(&mut self) {
-        self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
     }
 
     fn return_from_subroutine(&mut self) {
@@ -277,8 +271,8 @@ impl Emulator {
 
                     let screen_index = x_pixel_cord + y_pixel_cord * SCREEN_WIDTH;
 
-                    any_pixels_flipped |= self.screen[screen_index];
-                    self.screen[screen_index] ^= true;
+                    any_pixels_flipped |= self.screen.get_pixel(screen_index);
+                    self.screen.xor_pixel(screen_index, true);
                 }
             }
         }
@@ -358,7 +352,8 @@ impl Emulator {
 
     fn write_registers_v0_to_vx_in_ram_starting_at_i(&mut self, vx: usize) {
         for i in 0..=vx {
-            self.ram.write_byte(self.i_register as usize + i, self.v_registers[i]);
+            self.ram
+                .write_byte(self.i_register as usize + i, self.v_registers[i]);
         }
     }
 
@@ -393,7 +388,7 @@ impl Emulator {
     }
 
     pub fn get_display(&self) -> &[bool] {
-        &self.screen
+        self.screen.get_pixels()
     }
 
     pub fn set_key_press(&mut self, index: usize, pressed: bool) {
