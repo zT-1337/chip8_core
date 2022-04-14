@@ -1,37 +1,16 @@
+use crate::ram::{Ram, START_ADDRESS};
 use rand::random;
 
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGHT: usize = 32;
 
-const FONTSET_SIZE: usize = 80;
-const FONTSET: [u8; FONTSET_SIZE] = [
-    0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
-    0x20, 0x60, 0x20, 0x20, 0x70, // 1
-    0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
-    0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
-    0x90, 0x90, 0xF0, 0x10, 0x10, // 4
-    0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
-    0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
-    0xF0, 0x10, 0x20, 0x40, 0x40, // 7
-    0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
-    0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
-    0xF0, 0x90, 0xF0, 0x90, 0x90, // A
-    0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
-    0xF0, 0x80, 0x80, 0x80, 0xF0, // C
-    0xE0, 0x90, 0x90, 0x90, 0xE0, // D
-    0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
-    0xF0, 0x80, 0xF0, 0x80, 0x80, // F
-];
-
-const START_ADDRESS: u16 = 0x200;
-const RAM_SIZE: usize = 4096;
 const NUMBER_OF_V_REGISTERS: usize = 16;
 const STACK_SIZE: usize = 16;
 const NUMBER_OF_KEYS: usize = 16;
 
 pub struct Emulator {
     program_counter: u16,
-    ram: [u8; RAM_SIZE],
+    ram: Ram,
     screen: [bool; SCREEN_WIDTH * SCREEN_HEIGHT],
     v_registers: [u8; NUMBER_OF_V_REGISTERS],
     i_register: u16,
@@ -44,9 +23,9 @@ pub struct Emulator {
 
 impl Emulator {
     pub fn new() -> Self {
-        let mut new_emulator = Self {
+        Self {
             program_counter: START_ADDRESS,
-            ram: [0; RAM_SIZE],
+            ram: Ram::new(),
             screen: [false; SCREEN_WIDTH * SCREEN_HEIGHT],
             v_registers: [0; NUMBER_OF_V_REGISTERS],
             i_register: 0,
@@ -55,15 +34,7 @@ impl Emulator {
             keys_pressed: [false; NUMBER_OF_KEYS],
             delay_timer: 0,
             sound_timer: 0,
-        };
-
-        new_emulator.init_fontset();
-
-        new_emulator
-    }
-
-    fn init_fontset(&mut self) {
-        self.ram[..FONTSET_SIZE].copy_from_slice(&FONTSET);
+        }
     }
 
     pub fn cycle(&mut self) {
@@ -75,13 +46,8 @@ impl Emulator {
     }
 
     fn fetch(&mut self) -> u16 {
-        //Chip-8 is designed to be a big endian system
-        let higher_byte = self.ram[self.program_counter as usize] as u16;
-        let lower_byte = self.ram[(self.program_counter + 1) as usize] as u16;
-        let op_code = (higher_byte << 8) | lower_byte;
-
+        let op_code = self.ram.fetch_opcode(self.program_counter as usize);
         self.program_counter += 2;
-
         op_code
     }
 
@@ -103,9 +69,13 @@ impl Emulator {
             //CALL NNN
             (2, _, _, _) => self.call_subroutine_at_location(op_code & 0x0FFF),
             //SKIP VX == NN
-            (3, _, _, _) => self.skip_instruction_if_vx_equals_nn(digit2 as usize, (op_code & 0x00FF) as u8),
+            (3, _, _, _) => {
+                self.skip_instruction_if_vx_equals_nn(digit2 as usize, (op_code & 0x00FF) as u8)
+            }
             //SKIP VX != NN
-            (4, _, _, _) => self.skip_instruction_if_vx_not_equals_nn(digit2 as usize, (op_code & 0x00FF) as u8),
+            (4, _, _, _) => {
+                self.skip_instruction_if_vx_not_equals_nn(digit2 as usize, (op_code & 0x00FF) as u8)
+            }
             //SKIP VX == VY
             (5, _, _, 0) => self.skip_instruction_if_vx_equals_vy(digit2 as usize, digit3 as usize),
             //VX = NN
@@ -127,17 +97,23 @@ impl Emulator {
             //Vx >>= 1
             (8, _, _, 6) => self.bit_shift_right_vx(digit2 as usize),
             //VX = VY - VX
-            (8, _, _, 7) => self.subtract_vy_with_vx_store_in_vx_with_borrow(digit2 as usize, digit3 as usize),
+            (8, _, _, 7) => {
+                self.subtract_vy_with_vx_store_in_vx_with_borrow(digit2 as usize, digit3 as usize)
+            }
             //VX <<= 1
             (8, _, _, 0xE) => self.bit_shift_left_vx(digit2 as usize),
             //SKIP VX != VY
-            (9, _, _, 0) => self.skip_instruction_if_vx_not_equals_vy(digit2 as usize, digit3 as usize),
+            (9, _, _, 0) => {
+                self.skip_instruction_if_vx_not_equals_vy(digit2 as usize, digit3 as usize)
+            }
             // I = NNN
             (0xA, _, _, _) => self.set_i(op_code & 0x0FFF),
             //JMP V0 + NNN
             (0xB, _, _, _) => self.jump_to_location_plus_v0(op_code & 0x0FFf),
             //VX = rand() & NN
-            (0xC, _, _, _) => self.set_vx_with_random_value_and_nn(digit2 as usize, (op_code & 0x00FF) as u8),
+            (0xC, _, _, _) => {
+                self.set_vx_with_random_value_and_nn(digit2 as usize, (op_code & 0x00FF) as u8)
+            }
             //DRAW
             (0xD, _, _, _) => self.draw_sprite(digit2 as usize, digit3 as usize, digit4 as u8),
             //SKIP KEY PRESS
@@ -163,10 +139,7 @@ impl Emulator {
             //LOAD V0 - VX
             (0xF, _, 6, 5) => self.read_registers_v0_to_vx_from_ram_starting_at_i(digit2 as usize),
             //should not happen
-            (_, _, _, _) => unimplemented!(
-                "Unimplemented opcode: {:#04x}",
-                op_code
-            ),
+            (_, _, _, _) => unimplemented!("Unimplemented opcode: {:#04x}", op_code),
         }
     }
 
@@ -293,13 +266,14 @@ impl Emulator {
 
         for sprite_row_index in 0..sprite_height {
             let sprite_row_address = self.i_register + sprite_row_index as u16;
-            let sprite_pixels_in_row = self.ram[sprite_row_address as usize];
+            let sprite_pixels_in_row = self.ram.read_byte(sprite_row_address as usize);
 
             //Each Sprite row is 8 pixels wide
             for pixel_index in 0..8 {
                 if sprite_pixels_in_row & (0b1000_0000 >> pixel_index) != 0 {
                     let x_pixel_cord = (sprite_origin_x_cord + pixel_index) as usize % SCREEN_WIDTH;
-                    let y_pixel_cord = (sprite_origin_y_cord + sprite_row_index) as usize % SCREEN_HEIGHT;
+                    let y_pixel_cord =
+                        (sprite_origin_y_cord + sprite_row_index) as usize % SCREEN_HEIGHT;
 
                     let screen_index = x_pixel_cord + y_pixel_cord * SCREEN_WIDTH;
 
@@ -377,20 +351,20 @@ impl Emulator {
         let tenths = (vx_val / 10) % 10;
         let ones = vx_val as u8 % 10;
 
-        self.ram[self.i_register as usize] = hundreds;
-        self.ram[(self.i_register + 1) as usize] = tenths;
-        self.ram[(self.i_register + 2) as usize] = ones;
+        self.ram.write_byte(self.i_register as usize, hundreds);
+        self.ram.write_byte(self.i_register as usize + 1, tenths);
+        self.ram.write_byte(self.i_register as usize + 2, ones);
     }
 
     fn write_registers_v0_to_vx_in_ram_starting_at_i(&mut self, vx: usize) {
         for i in 0..=vx {
-            self.ram[self.i_register as usize + i] = self.v_registers[i];
+            self.ram.write_byte(self.i_register as usize + i, self.v_registers[i]);
         }
     }
 
     fn read_registers_v0_to_vx_from_ram_starting_at_i(&mut self, vx: usize) {
         for i in 0..=vx {
-            self.v_registers[i] = self.ram[self.i_register as usize + i];
+            self.v_registers[i] = self.ram.read_byte(self.i_register as usize + i);
         }
     }
 
@@ -427,8 +401,6 @@ impl Emulator {
     }
 
     pub fn load_rom(&mut self, rom: &[u8]) {
-        let start = START_ADDRESS as usize;
-        let end = start + rom.len();
-        self.ram[start..end].copy_from_slice(rom);
+        self.ram.load_rom(rom);
     }
 }
